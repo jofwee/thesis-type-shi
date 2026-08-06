@@ -1,26 +1,72 @@
 @import "tailwindcss";
 
+/* "Alerto" brand theme — fixed dark-navy shell with light floating panels,
+   matching the thesis's approved mockups (Figures 7-9). This is a committed
+   brand identity, not a light/dark toggle, so it does not follow OS preference. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0e1930;
+  --foreground: #f4f6fb;
+  --panel: #eef1f6;
+  --panel-border: #d7dbe4;
+  --ink: #141b2e;
+  --ink-secondary: #5b6478;
+  --ink-muted: #8890a0;
+  --accent: #3454a6;
+  --accent-hover: #2c458c;
+  --navy-soft: #16233f;
+  --navy-border: #26314f;
+  --logo-fill: #c7d2f0;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-panel: var(--panel);
+  --color-panel-border: var(--panel-border);
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-navy-soft: var(--navy-soft);
+  --color-navy-border: var(--navy-border);
+  --color-logo-fill: var(--logo-fill);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+@keyframes flash-border {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(225, 29, 72, 0);
+  }
+}
+
+.fatigue-flash {
+  animation: flash-border 1s ease-out infinite;
+}
+
+/* Validated categorical palette for data viz (dataviz skill reference palette) */
+.fatigue-trend-chart {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --chart-grid: #dde1e9;
+  --chart-text-muted: #8890a0;
+  --chart-text-secondary: #5b6478;
+  --chart-surface: #eef1f6;
 }
