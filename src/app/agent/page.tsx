@@ -99,7 +99,14 @@ export default function AgentInterfacePage() {
         return;
       }
       callStateRef.current = existing.status === "on_call" ? "on_call" : "standby";
-      setAgent(existing);
+      const activeSession: AgentSession = existing.status === "offline"
+        ? { ...existing, status: "standby" }
+        : existing;
+
+      if (existing.status === "offline") {
+        upsertAgent(activeSession);
+      }
+      setAgent(activeSession);
       requestNotificationPermission();
     })();
     return () => {
@@ -115,7 +122,7 @@ export default function AgentInterfacePage() {
   const handleFatigueTrigger = useCallback(
     (metrics: LiveMetrics, reason: string) => {
       const base = agentRef.current;
-      if (!base || base.status === "logged_out") return;
+      if (!base || base.status === "offline") return;
 
       const incident: IncidentEntry = {
         id: newId(),
@@ -161,7 +168,7 @@ export default function AgentInterfacePage() {
       lastSeverityRef.current = severity;
       const now = Date.now();
       const current = agentRef.current;
-      if (!current || current.status === "logged_out" || current.status === "fatigue_alert") return;
+      if (!current || current.status === "offline" || current.status === "fatigue_alert") return;
 
       const nextStatus = severityToStatus(callStateRef.current, severity);
       const statusChanged = nextStatus !== current.status;
@@ -270,40 +277,57 @@ export default function AgentInterfacePage() {
     const landmarker = landmarkerRef.current;
     if (!video || !landmarker) return;
 
+    let lastTimestamp = 0;
+    let consecutiveErrors = 0;
+
     detectionIntervalRef.current = setInterval(() => {
-      if (!video || video.readyState < 2) return;
-      const result = landmarker.detectForVideo(video, performance.now());
-      const landmarks = result.faceLandmarks?.[0];
+      if (!video || video.readyState < 2 || video.paused || video.videoWidth === 0 || video.videoHeight === 0) return;
 
-      if (!landmarks) {
-        setFaceDetected(false);
-        return;
-      }
-      setFaceDetected(true);
-
-      const ear = computeEAR(landmarks as Landmark[]);
-      const mar = computeMAR(landmarks as Landmark[]);
-      const matrixData = result.facialTransformationMatrixes?.[0]?.data;
-      const headTiltRaw = computeHeadTiltDegrees(matrixData ? Array.from(matrixData) : undefined);
       const now = performance.now();
+      if (now <= lastTimestamp) return;
+      lastTimestamp = now;
 
-      const tick = fatigueEngineRef.current.tick(ear, headTiltRaw, mar, now);
-      setCalibrating(tick.phase === "calibrating");
-      setCalibrationProgress(tick.calibrationProgress);
-      if (tick.phase === "calibrating") return;
+      try {
+        const result = landmarker.detectForVideo(video, now);
+        consecutiveErrors = 0;
+        const landmarks = result.faceLandmarks?.[0];
 
-      const metrics: LiveMetrics = {
-        ear,
-        blinkFreq: tick.blinkFreq,
-        headPos: tick.headDeviationDeg,
-        score: tick.score,
-        perclos: tick.perclos,
-        avgBlinkDurationMs: tick.avgBlinkDurationMs,
-        yawnCount: tick.yawnCount,
-      };
+        if (!landmarks) {
+          setFaceDetected(false);
+          return;
+        }
+        setFaceDetected(true);
 
-      syncMetrics(metrics, tick.severity);
-      if (tick.shouldFireAlert) handleFatigueTrigger(metrics, tick.reason);
+        const ear = computeEAR(landmarks as Landmark[]);
+        const mar = computeMAR(landmarks as Landmark[]);
+        const matrixData = result.facialTransformationMatrixes?.[0]?.data;
+        const headTiltRaw = computeHeadTiltDegrees(matrixData ? Array.from(matrixData) : undefined);
+
+        const tick = fatigueEngineRef.current.tick(ear, headTiltRaw, mar, now);
+        setCalibrating(tick.phase === "calibrating");
+        setCalibrationProgress(tick.calibrationProgress);
+        if (tick.phase === "calibrating") return;
+
+        const metrics: LiveMetrics = {
+          ear,
+          blinkFreq: tick.blinkFreq,
+          headPos: tick.headDeviationDeg,
+          score: tick.score,
+          perclos: tick.perclos,
+          avgBlinkDurationMs: tick.avgBlinkDurationMs,
+          yawnCount: tick.yawnCount,
+        };
+
+        syncMetrics(metrics, tick.severity);
+        if (tick.shouldFireAlert) handleFatigueTrigger(metrics, tick.reason);
+      } catch (err) {
+        consecutiveErrors++;
+        console.warn(`MediaPipe face detection frame error (${consecutiveErrors}/3):`, err);
+        if (consecutiveErrors >= 3) {
+          console.warn("Switching to simulated mode due to persistent landmarker runtime errors.");
+          setDetectionMode("simulated");
+        }
+      }
     }, DETECTION_TICK_MS);
 
     return () => {
@@ -349,7 +373,6 @@ export default function AgentInterfacePage() {
     return () => {
       if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
       if (alertTimeoutRef.current) clearTimeout(alertTimeoutRef.current);
-      landmarkerRef.current?.close();
     };
   }, []);
 
@@ -376,7 +399,7 @@ export default function AgentInterfacePage() {
     if (alertTimeoutRef.current) clearTimeout(alertTimeoutRef.current);
     landmarkerRef.current?.close();
     streamRef.current?.getTracks().forEach((t) => t.stop());
-    if (agent) upsertAgent({ ...agent, status: "logged_out", callSessionId: null });
+    if (agent) upsertAgent({ ...agent, status: "offline", callSessionId: null });
     sessionStorage.removeItem("fm_current_agent");
     router.push("/login?role=agent");
   }, [agent, router]);
@@ -501,7 +524,7 @@ export default function AgentInterfacePage() {
                 {agent.status === "on_call" && "Active call in progress — fatigue monitoring is running."}
                 {agent.status === "drowsy" && "Early signs of fatigue detected — keep watching for a full alert."}
                 {agent.status === "fatigue_alert" && "Fatigue threshold met. Alert issued to agent."}
-                {agent.status === "logged_out" && "Session ended."}
+                {agent.status === "offline" && "Session ended."}
               </p>
               <div className="mt-3 flex items-center justify-between border-t border-panel-border pt-3 text-xs">
                 <div>
@@ -610,7 +633,7 @@ export default function AgentInterfacePage() {
                 </button>
                 <button
                   onClick={endCall}
-                  disabled={agent.status === "standby" || agent.status === "logged_out"}
+                  disabled={agent.status === "standby" || agent.status === "offline"}
                   className="rounded-lg border border-panel-border bg-white py-2 text-xs font-semibold text-ink transition enabled:hover:border-accent enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Simulate Call End

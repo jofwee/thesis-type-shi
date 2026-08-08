@@ -16,7 +16,8 @@ function logError(context: string, error: unknown) {
   // Write functions are fire-and-forget from the UI's perspective (the app
   // already updates local state optimistically), so failures are logged
   // rather than surfaced — a dropped write shouldn't block the agent's flow.
-  console.error(`[store] ${context}:`, error);
+  const detail = error && typeof error === "object" ? JSON.stringify(error) : error;
+  console.error(`[store] ${context}:`, detail);
 }
 
 // --- Row <-> app-model mapping (DB is snake_case, app types are camelCase) ---
@@ -171,6 +172,73 @@ export async function getSnapshot(): Promise<StoreSnapshot> {
 // the write landed (e.g. login, before navigating somewhere that immediately
 // reads the row back) can await it — but nothing requires awaiting; ignoring
 // the returned promise is a valid fire-and-forget call. ---
+
+export async function authenticateAgent(
+  identifier: string,
+  pass: string
+): Promise<{ success: true; agent: AgentSession } | { success: false; error: string }> {
+  // Look up by name (case-insensitive). Use a fresh, fully-chained query
+  // to avoid PostgREST builder immutability issues.
+  const { data, error } = await supabase
+    .from("agents")
+    .select("*")
+    .ilike("name", identifier)
+    .order("login_time", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    logError("authenticateAgent", error);
+    return { success: false, error: `Database error: ${error.message || JSON.stringify(error)}` };
+  }
+
+  const agentRow = data?.[0] as (AgentRow & { password?: string }) | undefined;
+
+  if (!agentRow) {
+    return { success: false, error: "Unauthorized Agent. Account not found in Supabase." };
+  }
+
+  const expectedPassword = agentRow.password ?? "password123";
+  if (expectedPassword !== pass) {
+    return { success: false, error: "Invalid password for authorized agent." };
+  }
+
+  const updatedAgent: AgentSession = {
+    ...rowToAgent(agentRow),
+    loginTime: new Date().toISOString(),
+    status: "standby",
+  };
+
+  await upsertAgent(updatedAgent);
+  return { success: true, agent: updatedAgent };
+}
+
+export async function authenticateSupervisor(
+  username: string,
+  pass: string
+): Promise<{ success: true; name: string } | { success: false; error: string }> {
+  const { data, error } = await supabase
+    .from("supervisors")
+    .select("*")
+    .ilike("username", username)
+    .limit(1);
+
+  if (error) {
+    logError("authenticateSupervisor", error);
+    return { success: false, error: "Database error during supervisor authentication." };
+  }
+
+  const supervisorRow = data?.[0] as { id: string; username: string; password?: string; name?: string } | undefined;
+
+  if (!supervisorRow) {
+    return { success: false, error: "Unauthorized Supervisor. Account not found in Supabase." };
+  }
+
+  if (supervisorRow.password && supervisorRow.password !== pass) {
+    return { success: false, error: "Invalid password for supervisor account." };
+  }
+
+  return { success: true, name: supervisorRow.name || supervisorRow.username };
+}
 
 export async function upsertAgent(agent: AgentSession): Promise<void> {
   const { error } = await supabase.from("agents").upsert(agentToRow(agent));

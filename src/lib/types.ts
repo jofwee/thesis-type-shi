@@ -1,4 +1,4 @@
-export type AgentStatus = "standby" | "on_call" | "drowsy" | "fatigue_alert" | "logged_out";
+export type AgentStatus = "standby" | "on_call" | "drowsy" | "fatigue_alert" | "offline";
 
 export interface AgentSession {
   id: string;

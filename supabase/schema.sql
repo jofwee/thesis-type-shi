@@ -12,9 +12,10 @@ create table if not exists agents (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   station_id text not null,
+  password text not null default 'password123',
   login_time timestamptz not null default now(),
-  status text not null default 'standby'
-    check (status in ('standby', 'on_call', 'drowsy', 'fatigue_alert', 'logged_out')),
+  status text not null default 'offline'
+    check (status in ('standby', 'on_call', 'drowsy', 'fatigue_alert', 'offline', 'logged_out')),
   call_session_id text,
   ear real not null default 0,
   blink_freq real not null default 0,
@@ -24,6 +25,27 @@ create table if not exists agents (
   total_incidents int not null default 0,
   updated_at timestamptz not null default now()
 );
+
+-- Ensure existing database instances get the password column, updated check constraint, and default offline status
+alter table agents add column if not exists password text not null default 'password123';
+alter table agents drop constraint if exists agents_status_check;
+alter table agents drop constraint if exists agents_status_check1;
+alter table agents drop constraint if exists agents_status_check2;
+
+-- Re-create clean check constraint allowing offline and logged_out
+alter table agents add constraint agents_status_check 
+  check (status in ('standby', 'on_call', 'drowsy', 'fatigue_alert', 'offline', 'logged_out'));
+
+-- Set default column value to 'offline'
+alter table agents alter column status set default 'offline';
+
+-- Seed initial authorized agents as offline by default
+insert into agents (id, name, station_id, password, status)
+values
+  ('11111111-1111-1111-1111-111111111111', 'Jeoffrey', 'Station-50', 'password123', 'offline'),
+  ('22222222-2222-2222-2222-222222222222', 'gegeg', 'Station-32', 'password123', 'offline'),
+  ('33333333-3333-3333-3333-333333333333', 'Agent Smith', 'Station-01', 'password123', 'offline')
+on conflict (id) do update set status = excluded.status, password = excluded.password;
 
 -- One row per fatigue alert — matches the flowchart's "Trigger Alert & Log
 -- Incident → Save to Database" step.
@@ -58,6 +80,20 @@ insert into shift_stats (id, calls_started)
   values (1, 0)
   on conflict (id) do nothing;
 
+-- Authorized supervisor accounts table.
+create table if not exists supervisors (
+  id uuid primary key default gen_random_uuid(),
+  username text not null unique,
+  password text not null default 'admin123',
+  name text not null,
+  created_at timestamptz not null default now()
+);
+
+-- Seed initial default supervisor account
+insert into supervisors (username, password, name)
+values ('admin', 'admin123', 'Supervisor Admin')
+on conflict (username) do nothing;
+
 create index if not exists incidents_agent_id_idx on incidents (agent_id);
 create index if not exists score_samples_agent_id_sampled_at_idx on score_samples (agent_id, sampled_at);
 
@@ -66,6 +102,7 @@ create index if not exists score_samples_agent_id_sampled_at_idx on score_sample
 create or replace function increment_calls_started()
 returns void
 language sql
+set search_path = public, pg_temp
 as $$
   update shift_stats set calls_started = calls_started + 1 where id = 1;
 $$;
@@ -79,6 +116,7 @@ alter table agents enable row level security;
 alter table incidents enable row level security;
 alter table score_samples enable row level security;
 alter table shift_stats enable row level security;
+alter table supervisors enable row level security;
 
 drop policy if exists "agents_all" on agents;
 create policy "agents_all" on agents for all using (true) with check (true);
@@ -91,6 +129,9 @@ create policy "score_samples_all" on score_samples for all using (true) with che
 
 drop policy if exists "shift_stats_all" on shift_stats;
 create policy "shift_stats_all" on shift_stats for all using (true) with check (true);
+
+drop policy if exists "supervisors_all" on supervisors;
+create policy "supervisors_all" on supervisors for all using (true) with check (true);
 
 -- Realtime: broadcast row changes so the agent + supervisor pages can
 -- subscribe instead of polling (replaces the current BroadcastChannel hack,

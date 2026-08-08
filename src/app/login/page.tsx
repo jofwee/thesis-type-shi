@@ -4,8 +4,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { KeyRound, Lock, User } from "lucide-react";
 import AppHeader from "@/components/AppHeader";
-import { newId, upsertAgent } from "@/lib/store";
-import type { AgentSession } from "@/lib/types";
+import { authenticateAgent, authenticateSupervisor } from "@/lib/store";
 
 type Role = "agent" | "supervisor";
 
@@ -23,37 +22,36 @@ function LoginForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!userId.trim() || !password.trim()) {
-      setError(`Enter both a${role === "agent" ? "n Agent ID" : " Supervisor ID"} and password.`);
+      setError(`Enter both a${role === "agent" ? "n Agent ID/Name" : " Supervisor ID"} and password.`);
       return;
     }
 
+    setSubmitting(true);
+    setError("");
+
     if (role === "supervisor") {
-      sessionStorage.setItem("fm_supervisor_name", userId.trim());
+      const supRes = await authenticateSupervisor(userId.trim(), password.trim());
+      if (!supRes.success) {
+        setError(supRes.error);
+        setSubmitting(false);
+        return;
+      }
+      sessionStorage.setItem("fm_supervisor_name", supRes.name);
       router.push("/supervisor");
       return;
     }
 
-    const id = newId();
-    const stationId = `Station-${Math.floor(10 + Math.random() * 90)}`;
-    const session: AgentSession = {
-      id,
-      name: userId.trim(),
-      stationId,
-      loginTime: new Date().toISOString(),
-      status: "standby",
-      callSessionId: null,
-      ear: 0,
-      blinkFreq: 0,
-      headPos: 0,
-      fatigueScore: 0,
-      totalCalls: 0,
-      totalIncidents: 0,
-    };
-
     setSubmitting(true);
     setError("");
-    await upsertAgent(session);
-    sessionStorage.setItem("fm_current_agent", id);
+
+    const res = await authenticateAgent(userId.trim(), password.trim());
+    if (!res.success) {
+      setError(res.error);
+      setSubmitting(false);
+      return;
+    }
+
+    sessionStorage.setItem("fm_current_agent", res.agent.id);
     router.push("/agent");
   }
 

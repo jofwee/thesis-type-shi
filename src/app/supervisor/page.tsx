@@ -23,20 +23,20 @@ function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-const STATUS_ORDER: AgentStatus[] = ["standby", "on_call", "drowsy", "fatigue_alert", "logged_out"];
+const STATUS_ORDER: AgentStatus[] = ["standby", "on_call", "drowsy", "fatigue_alert", "offline"];
 const STATUS_LABEL: Record<AgentStatus, string> = {
   standby: "Standby",
   on_call: "On Call",
   drowsy: "Drowsy",
   fatigue_alert: "Fatigue Alert",
-  logged_out: "Logged Out",
+  offline: "Offline",
 };
 const STATUS_DOT: Record<AgentStatus, string> = {
   standby: "bg-amber-400",
   on_call: "bg-emerald-500",
   drowsy: "bg-orange-500",
   fatigue_alert: "bg-rose-500",
-  logged_out: "bg-neutral-400",
+  offline: "bg-neutral-400",
 };
 
 function Panel({
@@ -117,9 +117,9 @@ export default function SupervisorDashboardPage() {
     () => Object.values(agents).sort((a, b) => a.loginTime.localeCompare(b.loginTime)),
     [agents]
   );
-  const presentAgents = useMemo(() => agentList.filter((a) => a.status !== "logged_out"), [agentList]);
+  const presentAgents = useMemo(() => agentList.filter((a) => a.status !== "offline"), [agentList]);
   const statusCounts = useMemo(() => {
-    const counts: Record<AgentStatus, number> = { standby: 0, on_call: 0, drowsy: 0, fatigue_alert: 0, logged_out: 0 };
+    const counts: Record<AgentStatus, number> = { standby: 0, on_call: 0, drowsy: 0, fatigue_alert: 0, offline: 0 };
     for (const a of agentList) counts[a.status] += 1;
     return counts;
   }, [agentList]);

@@ -1,5 +1,25 @@
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 
+// Suppress TFLite WASM stderr messages (e.g., "INFO: Created TensorFlow Lite XNNPACK delegate for CPU.")
+// from invoking console.error, which triggers Next.js dev error overlays despite being purely informational logs.
+if (typeof window !== "undefined") {
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    const firstArg = args[0];
+    if (
+      typeof firstArg === "string" &&
+      (firstArg.startsWith("INFO:") ||
+        firstArg.includes("TensorFlow Lite") ||
+        firstArg.includes("XNNPACK delegate") ||
+        firstArg.includes("Created TensorFlow Lite"))
+    ) {
+      console.info(...args);
+      return;
+    }
+    originalConsoleError.apply(console, args);
+  };
+}
+
 // Standard 6-point eye contours from MediaPipe's 478-point face mesh,
 // ordered [outer corner, upper-1, upper-2, inner corner, lower-2, lower-1]
 // so the EAR formula lines up the same way it does for dlib's 68-point set.
@@ -21,41 +41,55 @@ export interface Landmark {
 
 let landmarkerPromise: Promise<FaceLandmarker> | null = null;
 
-async function createLandmarker(delegate: "GPU" | "CPU") {
+async function createLandmarker() {
   const fileset = await FilesetResolver.forVisionTasks("/mediapipe/wasm");
-  return FaceLandmarker.createFromOptions(fileset, {
-    baseOptions: {
-      modelAssetPath: "/mediapipe/face_landmarker.task",
-      delegate,
-    },
-    runningMode: "VIDEO",
-    numFaces: 1,
-    outputFacialTransformationMatrixes: true,
-    outputFaceBlendshapes: false,
-  });
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Face landmarker load timed out")), ms);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
+  try {
+    return await FaceLandmarker.createFromOptions(fileset, {
+      baseOptions: {
+        modelAssetPath: "/mediapipe/face_landmarker.task",
+        delegate: "GPU",
       },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      }
-    );
-  });
+      runningMode: "VIDEO",
+      numFaces: 1,
+      outputFacialTransformationMatrixes: true,
+      outputFaceBlendshapes: false,
+    });
+  } catch (gpuErr) {
+    console.warn("GPU FaceLandmarker failed, trying CPU delegate fallback:", gpuErr);
+    return await FaceLandmarker.createFromOptions(fileset, {
+      baseOptions: {
+        modelAssetPath: "/mediapipe/face_landmarker.task",
+        delegate: "CPU",
+      },
+      runningMode: "VIDEO",
+      numFaces: 1,
+      outputFacialTransformationMatrixes: true,
+      outputFaceBlendshapes: false,
+    });
+  }
 }
 
 export function loadFaceLandmarker(): Promise<FaceLandmarker> {
   if (!landmarkerPromise) {
-    landmarkerPromise = withTimeout(createLandmarker("GPU"), 8000).catch(() => withTimeout(createLandmarker("CPU"), 8000));
+    landmarkerPromise = createLandmarker().catch((err) => {
+      landmarkerPromise = null;
+      throw err;
+    });
   }
   return landmarkerPromise;
+}
+
+export function closeFaceLandmarker() {
+  if (landmarkerPromise) {
+    landmarkerPromise
+      .then((instance) => {
+        try {
+          instance.close();
+        } catch {}
+      })
+      .catch(() => {});
+    landmarkerPromise = null;
+  }
 }
 
 function dist(a: Landmark, b: Landmark) {

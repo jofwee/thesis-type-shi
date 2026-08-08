@@ -5,7 +5,7 @@ const STYLES: Record<AgentStatus, string> = {
   on_call: "bg-emerald-100 text-emerald-800 border-emerald-300",
   drowsy: "bg-orange-100 text-orange-800 border-orange-300",
   fatigue_alert: "bg-rose-100 text-rose-800 border-rose-300 animate-pulse",
-  logged_out: "bg-neutral-100 text-neutral-500 border-neutral-300",
+  offline: "bg-neutral-100 text-neutral-500 border-neutral-300",
 };
 
 const LABELS: Record<AgentStatus, string> = {
@@ -13,7 +13,7 @@ const LABELS: Record<AgentStatus, string> = {
   on_call: "On Call",
   drowsy: "Drowsy",
   fatigue_alert: "Fatigue Alert",
-  logged_out: "Logged Out",
+  offline: "Offline",
 };
 
 export default function StatusPill({ status, className = "" }: { status: AgentStatus; className?: string }) {
